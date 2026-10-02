@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src http://127.0.0.1:8765; media-src blob:;" />
+  <title>Voice Assistant</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- Status bar -->
+  <header id="statusBar">
+    <span id="statusDot" class="dot dot--connecting"></span>
+    <span id="statusText">Connecting…</span>
+    <select id="voiceSelect" title="Select voice"></select>
+    <button id="clearBtn">Clear</button>
+  </header>
+
+  <!-- Document panel -->
+  <section id="docPanel" class="doc-panel doc-panel--collapsed">
+    <div id="docPanelHeader">
+      <span class="doc-panel__icon">📎</span>
+      <span id="docCount">No documents attached</span>
+      <label id="uploadBtn" for="fileInput" title="Attach PDF, TXT or Markdown">+ Attach</label>
+      <input type="file" id="fileInput" accept=".pdf,.txt,.md" multiple />
+      <span id="uploadSpinner" class="spinner hidden"></span>
+      <button id="docToggle" aria-label="Toggle document panel" title="Show/hide documents">▾</button>
+    </div>
+    <div id="docList"></div>
+    <p id="uploadError" class="upload-error hidden"></p>
+  </section>
+
+  <!-- Chat area -->
+  <main id="chat"></main>
+
+  <!-- Input area -->
+  <footer>
+    <canvas id="waveform"></canvas>
+    <div class="btn-row">
+      <button id="micBtn" class="mic-btn mic-btn--idle" title="Push to talk">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="32" height="32">
+          <path d="M12 1a4 4 0 0 1 4 4v7a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4zm-6 10a6 6 0 0 0 12 0h2a8 8 0 0 1-7 7.93V21h2v2H9v-2h2v-2.07A8 8 0 0 1 4 11h2z"/>
+        </svg>
+      </button>
+      <input id="textInput" type="text" placeholder="Type a message…" autocomplete="off" />
+      <button id="sendBtn" class="send-btn" title="Send message">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+          <path d="M2 21l21-9L2 3v7l15 2-15 2z"/>
+        </svg>
+      </button>
+      <button id="stopBtn" class="stop-btn hidden" title="Stop speaking">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="28" height="28">
+          <rect x="4" y="4" width="16" height="16" rx="2"/>
+        </svg>
+      </button>
+      <div class="speed-wrap">
+        <div id="speedMenu" class="speed-menu hidden"></div>
+        <button id="speedBtn" class="speed-btn" title="Playback speed">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+    <p id="micLabel">Click to record</p>
+  </footer>
+
+  <script src="marked.umd.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
