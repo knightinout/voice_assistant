@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Local voice assistant — Gradio UI, fully on-device, errors shown in UI."""
 
-import os, tempfile
+import os, sys, tempfile
 import numpy as np
 import gradio as gr
 import scipy.signal
@@ -10,7 +10,13 @@ from openai import OpenAI
 
 # ── Config ────────────────────────────────────────────────────────────────────
 WHISPER_MODEL    = "base"
-PIPER_MODEL_PATH = os.path.expanduser("~/.local/share/piper/en_US-lessac-medium.onnx")
+if sys.platform == "darwin":
+    _data_dir = os.path.expanduser("~/Library/Application Support/piper")
+elif sys.platform == "win32":
+    _data_dir = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~/AppData/Local")), "piper")
+else:
+    _data_dir = os.path.expanduser("~/.local/share/piper")
+PIPER_MODEL_PATH = os.path.join(_data_dir, "en_US-lessac-medium.onnx")
 LM_STUDIO_URL    = "http://localhost:1234/v1"
 SYSTEM_PROMPT    = ("You are a helpful assistant. "
                     "Give concise spoken responses — avoid markdown, bullet points, and code blocks.")

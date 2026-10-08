@@ -6,7 +6,9 @@ const { spawn } = require('child_process')
 process.stdout.on('error', (err) => { if (err.code !== 'EPIPE') throw err })
 process.stderr.on('error', (err) => { if (err.code !== 'EPIPE') throw err })
 
-const PYTHON_BIN = path.join(__dirname, '..', 'venv', 'bin', 'python')
+const PYTHON_BIN = process.platform === 'win32'
+  ? path.join(__dirname, '..', 'venv', 'Scripts', 'python.exe')
+  : path.join(__dirname, '..', 'venv', 'bin', 'python')
 const SERVER_PORT = 8765
 
 let mainWindow = null
@@ -19,7 +21,7 @@ function startPythonServer() {
       '--host', '127.0.0.1',
       '--port', String(SERVER_PORT),
       '--workers', '1'],
-    { cwd: path.join(__dirname, '..') }
+    { cwd: path.join(__dirname, '..'), shell: process.platform === 'win32' }
   )
 
   // Forward Python output to terminal AND renderer DevTools console
@@ -49,6 +51,18 @@ function startPythonServer() {
 
 function buildMenu() {
   const template = [
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
     {
       label: 'View',
       submenu: [

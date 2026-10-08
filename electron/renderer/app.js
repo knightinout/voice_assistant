@@ -11,7 +11,7 @@ const TOOL_LABELS = {
   list_directory:  'listing files',
   search_files:    'searching files',
   read_file:       'reading file',
-  apt_search:      'searching packages',
+  pkg_search:      'searching packages',
   list_installed:  'installed packages',
   create_note:     'creating note',
   move_file:       'moving file',
@@ -29,8 +29,13 @@ const stopBtn        = document.getElementById('stopBtn')
 const micLabel       = document.getElementById('micLabel')
 const textInput      = document.getElementById('textInput')
 const sendBtn        = document.getElementById('sendBtn')
-const speedBtn       = document.getElementById('speedBtn')
-const speedMenu      = document.getElementById('speedMenu')
+const settingsBtn    = document.getElementById('settingsBtn')
+const settingsMenu   = document.getElementById('settingsMenu')
+
+// Chat sessions
+const chatSelect     = document.getElementById('chatSelect')
+const newChatBtn     = document.getElementById('newChatBtn')
+const deleteChatBtn  = document.getElementById('deleteChatBtn')
 
 // Doc panel
 const docPanel       = document.getElementById('docPanel')
@@ -43,7 +48,11 @@ const uploadSpinner  = document.getElementById('uploadSpinner')
 const uploadError    = document.getElementById('uploadError')
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let conversationHistory = []
+let chatSessions = [{ id: 1, name: 'Chat 1', history: [], bubbles: '' }]
+let activeChatId = 1
+let nextChatId   = 2
+let conversationHistory = chatSessions[0].history
+const MAX_HISTORY = 10   // send only last N messages to avoid stale context
 let isRecording   = false
 let isProcessing  = false
 
@@ -200,9 +209,9 @@ function setUploadError(msg) {
 const COPY_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`
 const CHECK_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`
 
-async function copyText(text, btn) {
+function copyText(text, btn) {
   try {
-    await navigator.clipboard.writeText(text)
+    window.electronAPI.copyToClipboard(text)
     btn.innerHTML = CHECK_ICON
     btn.classList.add('bubble__copy-btn--ok')
     setTimeout(() => {
@@ -222,7 +231,29 @@ function addBubble(role, text, ragSources) {
   const content = document.createElement('div')
   content.className = 'bubble__content'
   if (isUser) {
-    content.textContent = text
+    // Split on explicit newlines first
+    let paragraphs = text.split(/\n+/).map(s => s.trim()).filter(Boolean)
+    // If still a single block longer than 100 chars, break at sentence boundaries
+    if (paragraphs.length === 1 && paragraphs[0].length > 100) {
+      paragraphs = paragraphs[0]
+        .split(/(?<=[.!?])\s+(?=[A-Z"'\(])/)
+        .reduce((acc, sentence) => {
+          if (!acc.length) return [sentence]
+          const last = acc[acc.length - 1]
+          if (last.length + sentence.length < 120) {
+            acc[acc.length - 1] = last + ' ' + sentence
+          } else {
+            acc.push(sentence)
+          }
+          return acc
+        }, [])
+    }
+    for (const para of paragraphs) {
+      const p = document.createElement('p')
+      p.textContent = para
+      content.appendChild(p)
+    }
+    if (!content.childNodes.length) content.textContent = text
   } else {
     content.innerHTML = marked.parse(text)
   }
@@ -246,11 +277,6 @@ function addBubble(role, text, ragSources) {
   chat.scrollTop = chat.scrollHeight
   return el
 }
-
-clearBtn.addEventListener('click', () => {
-  conversationHistory = []
-  chat.innerHTML = ''
-})
 
 // ── Recording ─────────────────────────────────────────────────────────────────
 micBtn.addEventListener('click', async () => {
@@ -332,7 +358,7 @@ async function stopAndProcess() {
     const cRes  = await fetch(`${SERVER}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ transcript, history: conversationHistory }),
+      body: JSON.stringify({ transcript, history: conversationHistory.slice(-MAX_HISTORY) }),
     })
     const data = await cRes.json()
 
@@ -371,8 +397,9 @@ async function stopAndProcess() {
 
     conversationHistory.push({ role: 'user',      content: transcript })
     conversationHistory.push({ role: 'assistant', content: data.reply  })
+    autoNameSession(transcript)
 
-    if (data.audio_b64) playBase64Wav(data.audio_b64)
+    if (data.audio_b64 && ttsEnabled) playBase64Wav(data.audio_b64)
   } catch (e) {
     console.error('Processing error:', e)
   }
@@ -395,10 +422,31 @@ textInput.addEventListener('keydown', (e) => {
   }
 })
 
+textInput.addEventListener('paste', (e) => {
+  e.preventDefault()
+  const pasted = e.clipboardData
+    ? e.clipboardData.getData('text/plain')
+    : window.electronAPI.readClipboard()
+  if (!pasted) return
+  const start = textInput.selectionStart
+  const end = textInput.selectionEnd
+  const before = textInput.value.slice(0, start)
+  const after = textInput.value.slice(end)
+  textInput.value = before + pasted + after
+  textInput.selectionStart = textInput.selectionEnd = start + pasted.length
+  textInput.dispatchEvent(new Event('input'))
+})
+
+textInput.addEventListener('input', () => {
+  textInput.style.height = 'auto'
+  textInput.style.height = Math.min(textInput.scrollHeight, 200) + 'px'
+})
+
 async function sendTextMessage(text) {
   if (isProcessing || isRecording) return
 
   textInput.value = ''
+  textInput.style.height = 'auto'
   textInput.disabled = true
   sendBtn.disabled  = true
   isProcessing = true
@@ -411,7 +459,7 @@ async function sendTextMessage(text) {
     const cRes = await fetch(`${SERVER}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ transcript: text, history: conversationHistory }),
+      body: JSON.stringify({ transcript: text, history: conversationHistory.slice(-MAX_HISTORY) }),
     })
     const data = await cRes.json()
 
@@ -442,8 +490,9 @@ async function sendTextMessage(text) {
       chat.scrollTop = chat.scrollHeight
       conversationHistory.push({ role: 'user',      content: text       })
       conversationHistory.push({ role: 'assistant', content: data.reply })
+      autoNameSession(text)
 
-      if (data.audio_b64) playBase64Wav(data.audio_b64)
+      if (data.audio_b64 && ttsEnabled) playBase64Wav(data.audio_b64)
     }
   } catch (e) {
     thinkingBubble.querySelector('.bubble__content').textContent = `Error: ${e.message}`
@@ -534,45 +583,138 @@ function setMicState(state) {
   micLabel.textContent = { idle: 'Click to record', recording: 'Click to stop', processing: 'Processing…' }[state] || ''
 }
 
-// ── Speed control ─────────────────────────────────────────────────────────────
-const BOLT_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>`
+// ── Settings menu ─────────────────────────────────────────────────────────────
+let settingsView = 'main'  // 'main' or 'speed'
+let ttsEnabled   = true
 
-function buildSpeedMenu() {
-  speedMenu.innerHTML = ''
+function buildSettingsMenu() {
+  settingsMenu.innerHTML = ''
 
-  const header = document.createElement('div')
-  header.className = 'speed-menu__header'
-  header.innerHTML = `${BOLT_SVG}<span>Playback speed</span><span class="speed-menu__current">${playbackSpeed === 1 ? '1×' : `${playbackSpeed}×`}</span>`
-  speedMenu.appendChild(header)
+  if (settingsView === 'speed') {
+    const back = document.createElement('button')
+    back.className = 'settings-menu__item settings-menu__back'
+    back.innerHTML = `<span class="settings-menu__arrow">‹</span> Playback speed`
+    back.addEventListener('click', (e) => { e.stopPropagation(); settingsView = 'main'; buildSettingsMenu() })
+    settingsMenu.appendChild(back)
+
+    const divider = document.createElement('div')
+    divider.className = 'settings-menu__divider'
+    settingsMenu.appendChild(divider)
+
+    for (const s of SPEEDS) {
+      const item = document.createElement('button')
+      item.className = 'settings-menu__item' + (s === playbackSpeed ? ' settings-menu__item--active' : '')
+      item.textContent = s === 1 ? '1× Normal' : `${s}×`
+      item.addEventListener('click', (e) => {
+        e.stopPropagation()
+        playbackSpeed = s
+        if (currentAudio) currentAudio.playbackRate = s
+        settingsView = 'main'
+        buildSettingsMenu()
+      })
+      settingsMenu.appendChild(item)
+    }
+    return
+  }
+
+  // Main settings view
+  const speedItem = document.createElement('button')
+  speedItem.className = 'settings-menu__item settings-menu__nav'
+  speedItem.innerHTML = `<span>Playback speed</span><span class="settings-menu__value">${playbackSpeed === 1 ? 'Normal' : `${playbackSpeed}×`}<span class="settings-menu__arrow">›</span></span>`
+  speedItem.addEventListener('click', (e) => { e.stopPropagation(); settingsView = 'speed'; buildSettingsMenu() })
+  settingsMenu.appendChild(speedItem)
 
   const divider = document.createElement('div')
-  divider.className = 'speed-menu__divider'
-  speedMenu.appendChild(divider)
+  divider.className = 'settings-menu__divider'
+  settingsMenu.appendChild(divider)
 
-  for (const s of SPEEDS) {
-    const item = document.createElement('button')
-    item.className = 'speed-menu__item' + (s === playbackSpeed ? ' speed-menu__item--active' : '')
-    item.textContent = s === 1 ? '1× Normal' : `${s}×`
-    item.addEventListener('click', () => setSpeed(s))
-    speedMenu.appendChild(item)
+  const ttsItem = document.createElement('button')
+  ttsItem.className = 'settings-menu__item settings-menu__toggle'
+  ttsItem.innerHTML = `<span>Read aloud</span><span class="settings-menu__switch ${ttsEnabled ? 'settings-menu__switch--on' : ''}"></span>`
+  ttsItem.addEventListener('click', (e) => {
+    e.stopPropagation()
+    ttsEnabled = !ttsEnabled
+    if (!ttsEnabled) stopAudio()
+    buildSettingsMenu()
+  })
+  settingsMenu.appendChild(ttsItem)
+}
+
+settingsBtn.addEventListener('click', (e) => {
+  e.stopPropagation()
+  settingsView = 'main'
+  buildSettingsMenu()
+  settingsMenu.classList.toggle('hidden')
+})
+
+document.addEventListener('click', () => settingsMenu.classList.add('hidden'))
+
+// ── Chat sessions ────────────────────────────────────────────────────────────
+function getActiveSession() {
+  return chatSessions.find(s => s.id === activeChatId)
+}
+
+function autoNameSession(firstMsg) {
+  const session = getActiveSession()
+  if (session.history.length > 2) return
+  const words = firstMsg.split(/\s+/).slice(0, 5).join(' ')
+  session.name = words.length > 30 ? words.slice(0, 30) + '…' : words
+  renderChatSelect()
+}
+
+function renderChatSelect() {
+  chatSelect.innerHTML = ''
+  for (const s of chatSessions) {
+    const opt = document.createElement('option')
+    opt.value = s.id
+    opt.textContent = s.name
+    if (s.id === activeChatId) opt.selected = true
+    chatSelect.appendChild(opt)
   }
 }
 
-function setSpeed(s) {
-  playbackSpeed = s
-  if (currentAudio) currentAudio.playbackRate = s
-  speedMenu.classList.add('hidden')
-  buildSpeedMenu()
+function saveBubbles() {
+  const session = getActiveSession()
+  if (session) session.bubbles = chat.innerHTML
 }
 
-speedBtn.addEventListener('click', (e) => {
-  e.stopPropagation()
-  speedMenu.classList.toggle('hidden')
+function switchToChat(id) {
+  saveBubbles()
+  activeChatId = id
+  const session = getActiveSession()
+  conversationHistory = session.history
+  chat.innerHTML = session.bubbles || ''
+  chat.scrollTop = chat.scrollHeight
+  renderChatSelect()
+}
+
+newChatBtn.addEventListener('click', () => {
+  saveBubbles()
+  const session = { id: nextChatId++, name: `Chat ${chatSessions.length + 1}`, history: [], bubbles: '' }
+  chatSessions.push(session)
+  switchToChat(session.id)
 })
 
-document.addEventListener('click', () => speedMenu.classList.add('hidden'))
+deleteChatBtn.addEventListener('click', () => {
+  if (chatSessions.length <= 1) return
+  chatSessions = chatSessions.filter(s => s.id !== activeChatId)
+  switchToChat(chatSessions[chatSessions.length - 1].id)
+})
+
+chatSelect.addEventListener('change', () => {
+  switchToChat(Number(chatSelect.value))
+})
+
+clearBtn.addEventListener('click', () => {
+  const session = getActiveSession()
+  session.history = []
+  session.bubbles = ''
+  conversationHistory = session.history
+  chat.innerHTML = ''
+})
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 window.electronAPI.onPyLog((line) => console.log(`%c[py] ${line}`, 'color:#7c6af5'))
-buildSpeedMenu()
+buildSettingsMenu()
+renderChatSelect()
 pollHealth()

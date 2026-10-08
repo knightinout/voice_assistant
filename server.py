@@ -6,9 +6,11 @@ import glob
 import io
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
+import sys
 import uuid
 import wave
 from contextlib import asynccontextmanager
@@ -22,32 +24,47 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from faster_whisper import WhisperModel
 from openai import OpenAI
-from piper.voice import PiperVoice
+try:
+    from piper.voice import PiperVoice
+    PIPER_OK = True
+except ImportError:
+    PiperVoice = None
+    PIPER_OK = False
 
 try:
-    import fitz  # pymupdf
+    import pymupdf as fitz
     PYMUPDF_OK = True
 except ImportError:
     PYMUPDF_OK = False
 
 # ── Config ────────────────────────────────────────────────────────────────────
-WHISPER_MODEL  = "base"
-VOICE_DIR      = os.path.expanduser("~/.local/share/piper")
-DEFAULT_VOICE  = os.path.join(VOICE_DIR, "en_GB-jenny_dioco-medium.onnx")
+WHISPER_MODEL  = "small"
 LM_STUDIO_URL  = "http://localhost:1234/v1"
-RAG_DIR        = Path.home() / ".local" / "share" / "voice_assistant_rag"
 NOTES_DIR      = Path.home() / "VoiceNotes"
-RAG_K          = 3
-RAG_THRESHOLD  = 0.25
+
+if sys.platform == "darwin":
+    _DATA_DIR = Path.home() / "Library" / "Application Support"
+elif sys.platform == "win32":
+    _DATA_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+else:
+    _DATA_DIR = Path.home() / ".local" / "share"
+
+VOICE_DIR     = str(_DATA_DIR / "piper")
+DEFAULT_VOICE = os.path.join(VOICE_DIR, "en_GB-jenny_dioco-medium.onnx")
+RAG_DIR       = _DATA_DIR / "voice_assistant_rag"
+RAG_K          = 8
+RAG_THRESHOLD  = 0.15
 AGENT_MAX_ITER = 8   # max tool-call rounds before forcing final answer
 
+_PKG_MGR = {"linux": "apt", "darwin": "brew", "win32": "winget"}.get(sys.platform, "the system package manager")
 SYSTEM_PROMPT = (
     "You are a helpful voice assistant with access to tools for managing files, "
     "checking system information, creating notes, and searching packages. "
     "Give concise spoken responses — avoid markdown, bullet points, and code blocks. "
-    "When asked to install or remove software, use apt_search to find the right package "
-    "name, then advise the user to run the command themselves — do not attempt to execute "
-    "sudo commands. Always confirm what you did after completing a task."
+    f"This system runs {platform.system()}. When asked to install or remove software, "
+    f"use pkg_search to find the right package name, then advise the user to run the "
+    f"{_PKG_MGR} command themselves — do not attempt to execute privileged commands. "
+    "Always confirm what you did after completing a task."
 )
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -182,8 +199,8 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "apt_search",
-            "description": "Search available apt packages by name or keyword.",
+            "name": "pkg_search",
+            "description": "Search available packages by name or keyword (apt on Linux, brew on macOS, winget on Windows).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -197,7 +214,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "list_installed",
-            "description": "List installed apt packages, optionally filtered by name.",
+            "description": "List installed packages, optionally filtered by name.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -251,7 +268,7 @@ TOOL_LABELS: dict[str, str] = {
     "list_directory": "listing directory",
     "search_files":   "searching files",
     "read_file":      "reading file",
-    "apt_search":     "searching packages",
+    "pkg_search":     "searching packages",
     "list_installed": "listing installed packages",
     "create_note":    "creating note",
     "move_file":      "moving file",
@@ -315,25 +332,46 @@ def execute_tool(name: str, args: dict) -> str:
             text = p.read_text(encoding="utf-8", errors="replace")
             return text[:4000] + ("\n...(truncated)" if len(text) > 4000 else "")
 
-        elif name == "apt_search":
+        elif name == "pkg_search":
             query = args.get("query", "").strip()
             if not query:
                 return "Error: query is required."
-            r = subprocess.run(["apt-cache", "search", "--names-only", query],
-                               capture_output=True, text=True, timeout=10)
+            if sys.platform == "linux":
+                r = subprocess.run(["apt-cache", "search", "--names-only", query],
+                                   capture_output=True, text=True, timeout=10)
+            elif sys.platform == "darwin":
+                r = subprocess.run(["brew", "search", query],
+                                   capture_output=True, text=True, timeout=15)
+            elif sys.platform == "win32":
+                r = subprocess.run(["winget", "search", query],
+                                   capture_output=True, text=True, timeout=15)
+            else:
+                return "Package search not supported on this platform."
             lines = [l for l in r.stdout.strip().split("\n") if l][:20]
             return "\n".join(lines) if lines else f"No packages found matching '{query}'."
 
         elif name == "list_installed":
             f = args.get("filter", "").strip()
-            cmd = ["dpkg", "-l"] + ([f"*{f}*"] if f else [])
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-            installed = []
-            for line in r.stdout.split("\n"):
-                if line.startswith("ii"):
-                    parts = line.split()
-                    if len(parts) >= 3:
-                        installed.append(f"{parts[1]}  {parts[2]}")
+            if sys.platform == "linux":
+                cmd = ["dpkg", "-l"] + ([f"*{f}*"] if f else [])
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                installed = []
+                for line in r.stdout.split("\n"):
+                    if line.startswith("ii"):
+                        parts = line.split()
+                        if len(parts) >= 3:
+                            installed.append(f"{parts[1]}  {parts[2]}")
+            elif sys.platform == "darwin":
+                cmd = ["brew", "list", "--formula", "-1"]
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                installed = [l for l in r.stdout.strip().split("\n")
+                             if l and (not f or f.lower() in l.lower())]
+            elif sys.platform == "win32":
+                cmd = ["winget", "list"] + (["-q", f] if f else [])
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+                installed = [l for l in r.stdout.strip().split("\n") if l][:30]
+            else:
+                return "Package listing not supported on this platform."
             return "\n".join(installed[:30]) if installed else "No matching packages found."
 
         elif name == "create_note":
@@ -391,9 +429,13 @@ async def lifespan(app: FastAPI):
     print("[server] Initialising OpenAI client…", flush=True)
     client = OpenAI(base_url=LM_STUDIO_URL, api_key="lm-studio")
 
-    print("[server] Loading default Piper voice…", flush=True)
-    current_voice = PiperVoice.load(DEFAULT_VOICE)
-    current_voice_id = DEFAULT_VOICE
+    if PIPER_OK and os.path.isfile(DEFAULT_VOICE):
+        print("[server] Loading default Piper voice…", flush=True)
+        current_voice = PiperVoice.load(DEFAULT_VOICE)
+        current_voice_id = DEFAULT_VOICE
+    else:
+        reason = "piper not installed" if not PIPER_OK else f"voice not found: {DEFAULT_VOICE}"
+        print(f"[server] TTS disabled ({reason}) — text-only mode.", flush=True)
 
     print("[server] Loading vector store…", flush=True)
     vector_store = VectorStore(RAG_DIR)
@@ -418,21 +460,35 @@ def extract_text(content: bytes, filename: str) -> str:
     return content.decode("utf-8", errors="replace")
 
 
-def chunk_text(text: str, chunk_size: int = 400, overlap: int = 60) -> list[str]:
+def chunk_text(text: str, chunk_size: int = 300, overlap: int = 80) -> list[str]:
     words = text.split()
     chunks, i = [], 0
     while i < len(words):
         chunk = " ".join(words[i : i + chunk_size])
-        if len(chunk.strip()) > 80:
+        if len(chunk.strip()) > 40:
             chunks.append(chunk)
         i += chunk_size - overlap
     return chunks
 
 
+def _get_embedding_model() -> str:
+    """Find a loaded embedding model in LM Studio, fall back to local-model."""
+    try:
+        models = client.models.list()
+        for m in models.data:
+            mid = m.id.lower()
+            if "embed" in mid or "e5" in mid or "bge" in mid or "gte" in mid:
+                return m.id
+    except Exception:
+        pass
+    return "local-model"
+
+
 def embed_texts(texts: list[str]) -> list[list[float]]:
+    model = _get_embedding_model()
     all_emb: list[list[float]] = []
     for i in range(0, len(texts), 8):
-        resp = client.embeddings.create(model="local-model", input=texts[i : i + 8])
+        resp = client.embeddings.create(model=model, input=texts[i : i + 8])
         all_emb.extend(e.embedding for e in resp.data)
     return all_emb
 
@@ -462,7 +518,9 @@ def format_reply(text: str) -> str:
     return re.sub(r'([.!?])\s+(?=[A-Z"\'\(])', r'\1\n\n', text).strip()
 
 
-def _synthesize_wav(text: str) -> bytes:
+def _synthesize_wav(text: str) -> bytes | None:
+    if not PIPER_OK or current_voice is None:
+        return None
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wf:
         first = True
@@ -481,8 +539,12 @@ def _synthesize_wav(text: str) -> bytes:
 @app.get("/health")
 async def health():
     try:
-        models = client.models.list()
-        name = models.data[0].id if models.data else "unknown"
+        resp = client.chat.completions.create(
+            model="local-model",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=1,
+        )
+        name = getattr(resp, "model", None) or "unknown"
         return {"status": "ok", "model": name}
     except Exception as e:
         return {"status": "error", "error": str(e)}
@@ -495,12 +557,15 @@ async def voices():
         "voices": [{"id": p, "name": os.path.splitext(os.path.basename(p))[0],
                     "current": p == current_voice_id} for p in paths],
         "current": current_voice_id,
+        "tts_available": PIPER_OK,
     }
 
 
 @app.post("/voice")
 async def set_voice(request: Request):
     global current_voice, current_voice_id
+    if not PIPER_OK:
+        return {"error": "TTS not available — piper is not installed on this platform."}
     body = await request.json()
     voice_id = body.get("voice_id", "")
     if not voice_id or not os.path.isfile(voice_id):
@@ -517,7 +582,10 @@ async def transcribe(request: Request, sample_rate: int = 44100):
     if len(audio) == 0:
         return {"transcript": ""}
     audio_16k = scipy.signal.resample(audio, int(len(audio) * 16000 / sample_rate))
-    segments, _ = stt.transcribe(audio_16k, beam_size=5, language="en")
+    segments, _ = stt.transcribe(
+        audio_16k, beam_size=5, language="en",
+        vad_filter=True, vad_parameters=dict(min_silence_duration_ms=500),
+    )
     return {"transcript": " ".join(s.text for s in segments).strip()}
 
 
@@ -532,14 +600,27 @@ async def chat(request: Request):
     rag_results: list[dict] = []
     if not vector_store.is_empty:
         try:
-            q_emb = embed_texts([transcript])[0]
-            rag_results = vector_store.query(q_emb, k=RAG_K)
-            if rag_results:
-                sources    = list(dict.fromkeys(r["filename"] for r in rag_results))
-                ctx_parts  = [f'[{r["filename"]}]\n{r["text"]}' for r in rag_results]
-                rag_context = (f"\n\nRelevant context from: {', '.join(sources)}\n\n"
-                               + "\n---\n".join(ctx_parts))
-                print(f"[server] RAG: {len(rag_results)} chunk(s) from {sources}", flush=True)
+            doc_list = vector_store.list_docs()
+            if len(doc_list) == 1:
+                doc = vector_store.docs[doc_list[0]["doc_id"]]
+                all_text = "\n\n".join(c["text"] for c in doc["chunks"])
+                # Cap at ~6000 words to avoid blowing context
+                words = all_text.split()
+                if len(words) > 6000:
+                    all_text = " ".join(words[:6000]) + "\n...(document truncated)"
+                rag_context = (f"\n\nFull content of attached document '{doc['filename']}':\n\n"
+                               + all_text)
+                rag_results = [{"filename": doc["filename"], "text": "", "score": 1.0}]
+                print(f"[server] RAG: full doc '{doc['filename']}' ({len(words)} words)", flush=True)
+            else:
+                q_emb = embed_texts([transcript])[0]
+                rag_results = vector_store.query(q_emb, k=RAG_K)
+                if rag_results:
+                    sources    = list(dict.fromkeys(r["filename"] for r in rag_results))
+                    ctx_parts  = [f'[{r["filename"]}]\n{r["text"]}' for r in rag_results]
+                    rag_context = (f"\n\nRelevant context from: {', '.join(sources)}\n\n"
+                                   + "\n---\n".join(ctx_parts))
+                    print(f"[server] RAG: {len(rag_results)} chunk(s) from {sources}", flush=True)
         except Exception as e:
             print(f"[server] RAG error: {e}", flush=True)
 
@@ -548,6 +629,21 @@ async def chat(request: Request):
     messages = [{"role": "system", "content": system}] + list(history)
     messages.append({"role": "user", "content": transcript})
 
+    # ── Decide whether tools are needed ─────────────────────────────────────
+    _TOOL_KEYWORDS = {
+        "file", "folder", "directory", "search", "find",
+        "note", "move", "rename", "install", "package",
+        "cpu", "ram", "disk",
+        "what time", "what day", "what date", "what's the time", "what's the date",
+        "list files", "list folder", "list directory", "list installed",
+        "system info", "disk space", "open file", "read file", "create note",
+    }
+    _lower = transcript.lower().strip()
+    needs_tools = (
+        len(transcript.split()) > 3
+        and any(kw in _lower for kw in _TOOL_KEYWORDS)
+    )
+
     # ── Agentic loop ───────────────────────────────────────────────────────
     tools_used:  list[str] = []
     tool_events: list[dict] = []   # for UI display
@@ -555,12 +651,11 @@ async def chat(request: Request):
 
     for _iter in range(AGENT_MAX_ITER):
         try:
-            resp = client.chat.completions.create(
-                model="local-model",
-                messages=messages,
-                tools=TOOLS,
-                tool_choice="auto",
-            )
+            kwargs = dict(model="local-model", messages=messages)
+            if needs_tools:
+                kwargs["tools"] = TOOLS
+                kwargs["tool_choice"] = "auto"
+            resp = client.chat.completions.create(**kwargs)
         except Exception as e:
             # If the model/server doesn't support tools, fall back to plain completion
             print(f"[server] tools API error ({e}), retrying without tools", flush=True)
@@ -620,7 +715,7 @@ async def chat(request: Request):
     reply     = format_reply(reply)
     spoken    = clean_for_tts(reply)
     wav_bytes = _synthesize_wav(spoken)
-    audio_b64 = base64.b64encode(wav_bytes).decode()
+    audio_b64 = base64.b64encode(wav_bytes).decode() if wav_bytes else None
     rag_sources = list(dict.fromkeys(r["filename"] for r in rag_results)) if rag_context else []
 
     return {
@@ -651,8 +746,14 @@ async def upload_document(file: UploadFile = File(...)):
     try:
         embeddings = embed_texts(chunks)
     except Exception as e:
-        raise HTTPException(status_code=500,
-            detail=f"Embedding failed: {e}. Load an embedding model in LM Studio.")
+        err = str(e)
+        if "model" in err.lower() or "not found" in err.lower() or "404" in err:
+            detail = ("No embedding model loaded. In LM Studio, load an embedding model "
+                      "(e.g. text-embedding-nomic-embed-text-v1.5) alongside your chat model, "
+                      "then try again.")
+        else:
+            detail = f"Embedding failed: {e}"
+        raise HTTPException(status_code=500, detail=detail)
     doc_id = uuid.uuid4().hex[:8]
     vector_store.add(doc_id, filename, chunks, embeddings)
     print(f"[server] Stored '{filename}' as {doc_id} ({len(chunks)} chunks).", flush=True)

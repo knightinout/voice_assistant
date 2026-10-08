@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src http://127.0.0.1:8765; media-src blob:;" />
+  <meta http-equiv="Permissions-Policy" content="clipboard-read=*, clipboard-write=*" />
   <title>Voice Assistant</title>
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -14,6 +15,11 @@
     <span id="statusDot" class="dot dot--connecting"></span>
     <span id="statusText">Connecting…</span>
     <select id="voiceSelect" title="Select voice"></select>
+    <div class="chat-sessions">
+      <select id="chatSelect" title="Switch chat"></select>
+      <button id="newChatBtn" title="New chat">+ New</button>
+      <button id="deleteChatBtn" title="Delete this chat">✕</button>
+    </div>
     <button id="clearBtn">Clear</button>
   </header>
 
@@ -43,7 +49,7 @@
           <path d="M12 1a4 4 0 0 1 4 4v7a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4zm-6 10a6 6 0 0 0 12 0h2a8 8 0 0 1-7 7.93V21h2v2H9v-2h2v-2.07A8 8 0 0 1 4 11h2z"/>
         </svg>
       </button>
-      <input id="textInput" type="text" placeholder="Type a message…" autocomplete="off" />
+      <textarea id="textInput" placeholder="Type a message… (Shift+Enter for new line)" autocomplete="off" rows="1"></textarea>
       <button id="sendBtn" class="send-btn" title="Send message">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
           <path d="M2 21l21-9L2 3v7l15 2-15 2z"/>
@@ -54,11 +60,12 @@
           <rect x="4" y="4" width="16" height="16" rx="2"/>
         </svg>
       </button>
-      <div class="speed-wrap">
-        <div id="speedMenu" class="speed-menu hidden"></div>
-        <button id="speedBtn" class="speed-btn" title="Playback speed">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
-            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+      <div class="settings-wrap">
+        <div id="settingsMenu" class="settings-menu hidden"></div>
+        <button id="settingsBtn" class="settings-btn" title="Settings">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
           </svg>
         </button>
       </div>

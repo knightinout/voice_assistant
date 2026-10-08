@@ -9,6 +9,4 @@ if [ -n "$STALE" ]; then
     sleep 1
 fi
 
-exec "$SCRIPT_DIR/node_modules/electron/dist/electron" \
-  "$SCRIPT_DIR" \
-  --no-sandbox
+exec npx --prefix "$SCRIPT_DIR" electron "$SCRIPT_DIR" --no-sandbox

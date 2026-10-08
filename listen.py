@@ -11,12 +11,23 @@ import sounddevice as sd
 import scipy.signal
 from faster_whisper import WhisperModel
 from openai import OpenAI
-from piper.voice import PiperVoice
+try:
+    from piper.voice import PiperVoice
+    PIPER_OK = True
+except ImportError:
+    PiperVoice = None
+    PIPER_OK = False
 
 # ── Config ────────────────────────────────────────────────────────────────────
 SAMPLE_RATE      = 16000
-WHISPER_MODEL    = "base"
-PIPER_MODEL_PATH = os.path.expanduser("~/.local/share/piper/en_GB-jenny_dioco-medium.onnx")
+WHISPER_MODEL    = "small"
+if sys.platform == "darwin":
+    _data_dir = os.path.expanduser("~/Library/Application Support/piper")
+elif sys.platform == "win32":
+    _data_dir = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~/AppData/Local")), "piper")
+else:
+    _data_dir = os.path.expanduser("~/.local/share/piper")
+PIPER_MODEL_PATH = os.path.join(_data_dir, "en_GB-jenny_dioco-medium.onnx")
 LM_STUDIO_URL    = "http://localhost:1234/v1"
 SYSTEM_PROMPT    = ("You are a helpful assistant. "
                     "Give concise spoken responses — avoid markdown, bullet points, and code blocks.")
@@ -93,8 +104,13 @@ def main():
     banner("Loading Whisper STT…")
     stt = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
 
-    banner("Loading Piper TTS…")
-    voice = PiperVoice.load(PIPER_MODEL_PATH)
+    voice = None
+    if PIPER_OK and os.path.isfile(PIPER_MODEL_PATH):
+        banner("Loading Piper TTS…")
+        voice = PiperVoice.load(PIPER_MODEL_PATH)
+    else:
+        reason = "piper not installed" if not PIPER_OK else f"voice not found: {PIPER_MODEL_PATH}"
+        banner(f"TTS disabled ({reason}) — text-only mode")
 
     client = OpenAI(base_url=LM_STUDIO_URL, api_key="lm-studio")
     check_lmstudio(client)
@@ -141,8 +157,9 @@ def main():
             history.append({"role": "assistant", "content": reply})
             print(f"\033[1mAssistant:\033[0m {reply}")
 
-            print("Speaking…", flush=True)
-            speak(voice, reply)
+            if voice:
+                print("Speaking…", flush=True)
+                speak(voice, reply)
             print()
 
         except KeyboardInterrupt:
