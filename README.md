@@ -155,6 +155,16 @@ Key constants at the top of each script:
 
 ---
 
+## Git Workflow
+
+- **`main`** — stable releases only. Do not push directly.
+- **`dev`** — integration branch. All work merges here first.
+- Create feature branches off `dev` (e.g. `feature/new-voice`, `fix/mic-bug`)
+- Open PRs into `dev`. When `dev` is stable, merge into `main`.
+- Tag releases on `main`: `git tag v1.0`
+
+---
+
 ## Troubleshooting
 
 **LM Studio not reachable**
