@@ -30,7 +30,8 @@ else:
 PIPER_MODEL_PATH = os.path.join(_data_dir, "en_GB-jenny_dioco-medium.onnx")
 LM_STUDIO_URL    = "http://localhost:1234/v1"
 SYSTEM_PROMPT    = ("You are a helpful assistant. "
-                    "Give concise spoken responses — avoid markdown, bullet points, and code blocks.")
+                    "Give concise spoken responses — avoid markdown, bullet points, and code blocks."
+                    "\n/no_think")
 # ─────────────────────────────────────────────────────────────────────────────
 
 def banner(msg):
@@ -145,17 +146,23 @@ def main():
 
             history.append({"role": "user", "content": transcript})
 
-            print("Thinking…", flush=True)
+            print("\033[1mAssistant:\033[0m ", end="", flush=True)
             try:
-                resp = client.chat.completions.create(model="local-model", messages=history)
-                reply = resp.choices[0].message.content.strip()
+                stream = client.chat.completions.create(model="local-model", messages=history, temperature=0.7, stream=True, extra_body={"no_think": True})
+                reply = ""
+                for chunk in stream:
+                    delta = chunk.choices[0].delta.content
+                    if delta:
+                        reply += delta
+                        print(delta, end="", flush=True)
+                print()
+                reply = reply.strip()
             except Exception as e:
-                print(f"LLM error: {e}\n")
+                print(f"\nLLM error: {e}\n")
                 history.pop()
                 continue
 
             history.append({"role": "assistant", "content": reply})
-            print(f"\033[1mAssistant:\033[0m {reply}")
 
             if voice:
                 print("Speaking…", flush=True)
