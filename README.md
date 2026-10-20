@@ -2,7 +2,7 @@
 
 On-device voice assistant. Fully offline.
 
-https://raw.githubusercontent.com/knightinout/voice_assistant/main/docs/Voice_Assistant.mp4
+[![Demo](https://img.youtube.com/vi/p0h84ANGVzc/maxresdefault.jpg)](https://www.youtube.com/watch?v=p0h84ANGVzc)
 
 ## Quick Start
 
