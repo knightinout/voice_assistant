@@ -292,7 +292,10 @@ async function startRecording() {
   try {
     audioCtx = new AudioContext()
     browserSampleRate = audioCtx.sampleRate
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      video: false,
+    })
 
     const source = audioCtx.createMediaStreamSource(micStream)
     analyserNode = audioCtx.createAnalyser()

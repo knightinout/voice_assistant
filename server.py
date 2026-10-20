@@ -38,7 +38,7 @@ except ImportError:
     PYMUPDF_OK = False
 
 # ── Config ────────────────────────────────────────────────────────────────────
-WHISPER_MODEL  = "small"
+WHISPER_MODEL  = "medium"
 LM_STUDIO_URL  = "http://localhost:1234/v1"
 NOTES_DIR      = Path.home() / "VoiceNotes"
 
@@ -65,6 +65,7 @@ SYSTEM_PROMPT = (
     f"use pkg_search to find the right package name, then advise the user to run the "
     f"{_PKG_MGR} command themselves — do not attempt to execute privileged commands. "
     "Always confirm what you did after completing a task."
+    "\n/no_think"
 )
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -584,7 +585,8 @@ async def transcribe(request: Request, sample_rate: int = 44100):
     audio_16k = scipy.signal.resample(audio, int(len(audio) * 16000 / sample_rate))
     segments, _ = stt.transcribe(
         audio_16k, beam_size=5, language="en",
-        vad_filter=True, vad_parameters=dict(min_silence_duration_ms=500),
+        vad_filter=True, vad_parameters=dict(min_silence_duration_ms=300),
+        condition_on_previous_text=False,
     )
     return {"transcript": " ".join(s.text for s in segments).strip()}
 
@@ -651,7 +653,7 @@ async def chat(request: Request):
 
     for _iter in range(AGENT_MAX_ITER):
         try:
-            kwargs = dict(model="local-model", messages=messages)
+            kwargs = dict(model="local-model", messages=messages, temperature=0.7, extra_body={"no_think": True})
             if needs_tools:
                 kwargs["tools"] = TOOLS
                 kwargs["tool_choice"] = "auto"
@@ -660,7 +662,7 @@ async def chat(request: Request):
             # If the model/server doesn't support tools, fall back to plain completion
             print(f"[server] tools API error ({e}), retrying without tools", flush=True)
             try:
-                resp = client.chat.completions.create(model="local-model", messages=messages)
+                resp = client.chat.completions.create(model="local-model", messages=messages, temperature=0.7, extra_body={"no_think": True})
                 reply = (resp.choices[0].message.content or "").strip()
             except Exception as e2:
                 return {"error": str(e2)}
@@ -704,7 +706,7 @@ async def chat(request: Request):
     else:
         # Max iterations hit — request a plain summary
         try:
-            resp = client.chat.completions.create(model="local-model", messages=messages)
+            resp = client.chat.completions.create(model="local-model", messages=messages, temperature=0.7, extra_body={"no_think": True})
             reply = (resp.choices[0].message.content or "").strip()
         except Exception as e:
             return {"error": str(e)}
