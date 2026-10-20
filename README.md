@@ -1,20 +1,15 @@
 # Voice Assistant
 
-On-device voice assistant — Whisper STT, LM Studio, Piper TTS. Fully offline.
+On-device voice assistant. Fully offline.
 
-<video src="docs/Voice_Assistant.mp4" width="100%" controls></video>
+https://raw.githubusercontent.com/knightinout/voice_assistant/main/docs/Voice_Assistant.mp4
 
 ## Quick Start
 
-**Requires:** [LM Studio](https://lmstudio.ai) running with a chat + embedding model, Python 3.12+, Node.js v22+
+**Requires:** [LM Studio](https://lmstudio.ai) with a chat + embedding model loaded, Python 3.12+, Node.js v22+
 
 ```bash
 cd electron && npm start
 ```
 
-## Features
-
-- Voice in / voice out with RAG document Q&A
-- Multiple TTS voices, tool use, fully offline
-
-## [Documentation](docs/DOCUMENTATION.md)
+## [Docs](docs/DOCUMENTATION.md)
