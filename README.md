@@ -10,6 +10,8 @@ On-device voice assistant. Fully offline.
 
 [![Language Learning](https://img.youtube.com/vi/O9nguiKEMos/0.jpg)](https://www.youtube.com/watch?v=O9nguiKEMos)
 
+▶️ [Watch on YouTube](https://www.youtube.com/watch?v=O9nguiKEMos)
+
 Practice languages like English for free with unlimited local tokens — no API costs, no usage limits.
 
 ## Quick Start
